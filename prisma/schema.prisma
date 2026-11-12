@@ -1,0 +1,21 @@
+// Prisma schema for the tasks table.
+// The connection string is NOT here: Prisma 7 reads it from prisma.config.ts,
+// which reads DATABASE_URL from .env.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Task {
+  id    Int     @id @default(autoincrement())
+  title String
+  done  Boolean @default(false)
+
+  @@map("tasks")
+}

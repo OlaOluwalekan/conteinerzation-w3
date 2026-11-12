@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { PrismaClient } from "./generated/prisma/client";
 import type { NewTask, TaskUpdate } from "./validation";
 
 /** A task as the API sends it to clients. */
@@ -8,68 +8,52 @@ export interface Task {
   done: boolean;
 }
 
-/** A task as SQLite stores it: booleans are 0/1 integers. */
-interface TaskRow {
-  id: number;
-  title: string;
-  done: 0 | 1;
+/**
+ * The contract the routes depend on. Any storage (in-memory array, SQLite,
+ * Postgres) can sit behind it; the routes never know which one they get.
+ */
+export interface TaskRepository {
+  findAll(): Promise<Task[]>;
+  findById(id: number): Promise<Task | undefined>;
+  create(task: NewTask): Promise<Task>;
+  /** Returns the updated task, or undefined if no task has that id. */
+  update(id: number, changes: TaskUpdate): Promise<Task | undefined>;
+  /** Returns true if a task was deleted, false if no task has that id. */
+  delete(id: number): Promise<boolean>;
 }
 
-const toTask = (row: TaskRow): Task => ({ id: row.id, title: row.title, done: row.done === 1 });
+const toTask = ({ id, title, done }: Task): Task => ({ id, title, done });
 
 /**
- * All SQL for the tasks table lives here. The routes never touch the
- * database directly, so swapping SQLite for another database only
- * means rewriting this file.
+ * Postgres implementation, via Prisma. All database access for the tasks
+ * table lives here: swapping storage means swapping this class only.
  */
-export class TaskRepository {
-  private readonly stmts;
+export class PostgresTaskRepository implements TaskRepository {
+  constructor(private readonly prisma: PrismaClient) {}
 
-  constructor(db: Database.Database) {
-    this.stmts = {
-      findAll: db.prepare<[], TaskRow>("SELECT id, title, done FROM tasks ORDER BY id"),
-      findById: db.prepare<[number], TaskRow>("SELECT id, title, done FROM tasks WHERE id = ?"),
-      insert: db.prepare<[{ title: string; done: number }], TaskRow>(
-        "INSERT INTO tasks (title, done) VALUES (@title, @done) RETURNING id, title, done",
-      ),
-      // COALESCE keeps the current value for any field the client didn't send.
-      update: db.prepare<[{ id: number; title: string | null; done: number | null }], TaskRow>(
-        `UPDATE tasks
-            SET title = COALESCE(@title, title),
-                done  = COALESCE(@done, done)
-          WHERE id = @id
-      RETURNING id, title, done`,
-      ),
-      delete: db.prepare<[number]>("DELETE FROM tasks WHERE id = ?"),
-    };
+  async findAll(): Promise<Task[]> {
+    const rows = await this.prisma.task.findMany({ orderBy: { id: "asc" } });
+    return rows.map(toTask);
   }
 
-  /** Returns the updated task, or undefined if no task has that id. */
-  update(id: number, changes: TaskUpdate): Task | undefined {
-    const row = this.stmts.update.get({
-      id,
-      title: changes.title ?? null,
-      done: changes.done === undefined ? null : changes.done ? 1 : 0,
-    });
-    return row && toTask(row);
+  async findById(id: number): Promise<Task | undefined> {
+    const row = await this.prisma.task.findUnique({ where: { id } });
+    return row ? toTask(row) : undefined;
   }
 
-  /** Returns true if a task was deleted, false if no task has that id. */
-  delete(id: number): boolean {
-    return this.stmts.delete.run(id).changes > 0;
+  async create(task: NewTask): Promise<Task> {
+    return toTask(await this.prisma.task.create({ data: task }));
   }
 
-  create(task: NewTask): Task {
-    const row = this.stmts.insert.get({ title: task.title, done: task.done ? 1 : 0 })!;
-    return toTask(row);
+  async update(id: number, changes: TaskUpdate): Promise<Task | undefined> {
+    // updateMany doesn't throw on a missing id; count tells us if it existed.
+    // Undefined fields are skipped by Prisma, so unsent fields keep their value.
+    const { count } = await this.prisma.task.updateMany({ where: { id }, data: changes });
+    return count === 0 ? undefined : this.findById(id);
   }
 
-  findAll(): Task[] {
-    return this.stmts.findAll.all().map(toTask);
-  }
-
-  findById(id: number): Task | undefined {
-    const row = this.stmts.findById.get(id);
-    return row && toTask(row);
+  async delete(id: number): Promise<boolean> {
+    const { count } = await this.prisma.task.deleteMany({ where: { id } });
+    return count > 0;
   }
 }

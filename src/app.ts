@@ -1,6 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from "express";
-import type Database from "better-sqlite3";
-import { TaskRepository } from "./taskRepository";
+import type { TaskRepository } from "./taskRepository";
 import { validateNewTask, validateTaskUpdate } from "./validation";
 
 const NOT_FOUND = { error: "Task not found" };
@@ -13,46 +12,45 @@ function parseId(req: Request): number | undefined {
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-export function createApp(db: Database.Database) {
-  const tasks = new TaskRepository(db);
+export function createApp(tasks: TaskRepository) {
   const app = express();
   app.use(express.json());
 
   // GET /tasks — every task
-  app.get("/tasks", (_req: Request, res: Response) => {
-    res.json(tasks.findAll());
+  app.get("/tasks", async (_req: Request, res: Response) => {
+    res.json(await tasks.findAll());
   });
 
   // GET /tasks/:id — one task, or 404
-  app.get("/tasks/:id", (req: Request, res: Response) => {
+  app.get("/tasks/:id", async (req: Request, res: Response) => {
     const id = parseId(req);
-    const task = id === undefined ? undefined : tasks.findById(id);
+    const task = id === undefined ? undefined : await tasks.findById(id);
     if (!task) return res.status(404).json(NOT_FOUND);
     res.json(task);
   });
 
   // POST /tasks — create a task, 201 with the new row, or 400
-  app.post("/tasks", (req: Request, res: Response) => {
+  app.post("/tasks", async (req: Request, res: Response) => {
     const result = validateNewTask(req.body);
     if (!result.ok) return res.status(400).json({ error: result.error });
-    res.status(201).json(tasks.create(result.value));
+    res.status(201).json(await tasks.create(result.value));
   });
 
   // PUT /tasks/:id — update title and/or done; 404 for unknown ids, 400 for bad bodies
-  app.put("/tasks/:id", (req: Request, res: Response) => {
+  app.put("/tasks/:id", async (req: Request, res: Response) => {
     const id = parseId(req);
     if (id === undefined) return res.status(404).json(NOT_FOUND);
     const result = validateTaskUpdate(req.body);
     if (!result.ok) return res.status(400).json({ error: result.error });
-    const task = tasks.update(id, result.value);
+    const task = await tasks.update(id, result.value);
     if (!task) return res.status(404).json(NOT_FOUND);
     res.json(task);
   });
 
   // DELETE /tasks/:id — 204 on success, 404 for unknown ids
-  app.delete("/tasks/:id", (req: Request, res: Response) => {
+  app.delete("/tasks/:id", async (req: Request, res: Response) => {
     const id = parseId(req);
-    if (id === undefined || !tasks.delete(id)) return res.status(404).json(NOT_FOUND);
+    if (id === undefined || !(await tasks.delete(id))) return res.status(404).json(NOT_FOUND);
     res.status(204).end();
   });
 

@@ -1,19 +1,20 @@
--- Stage 4: first SQL queries, run by hand against tasks.db
--- (e.g. in DBeaver's SQL editor, with auto-commit on).
+-- Hand-run queries against the Postgres "tasks" table, e.g.
+--   docker compose exec db psql -U tasks -d tasks
+-- or in DBeaver connected to localhost:5432.
 -- The API reads straight from the database, so GET /tasks reflects
--- every change made here immediately — no server restart needed.
+-- every change made here immediately, with no server restart needed.
 
 -- List every task
-SELECT * FROM tasks;
+SELECT * FROM tasks ORDER BY id;
 
--- Show only completed tasks
-SELECT * FROM tasks WHERE done = 1;
+-- Show only completed tasks (Postgres has a real BOOLEAN, unlike SQLite's 0/1)
+SELECT * FROM tasks WHERE done = true;
 
 -- Count all tasks
 SELECT COUNT(*) FROM tasks;
 
 -- Mark every task as completed
-UPDATE tasks SET done = 1;
+UPDATE tasks SET done = true;
 
 -- Delete all completed tasks (after the UPDATE above, this empties the table!)
-DELETE FROM tasks WHERE done = 1;
+DELETE FROM tasks WHERE done = true;

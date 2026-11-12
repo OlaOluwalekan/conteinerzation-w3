@@ -1,24 +1,28 @@
 {
-  "name": "connecting-db-w3",
+  "name": "containerization-w3",
   "version": "1.0.0",
-  "description": "Task CRUD API (Express + TypeScript) persisted in SQLite",
+  "description": "Task CRUD API (Express + TypeScript) on Postgres via Prisma, containerized with Docker Compose",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev"
   },
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^13.1.1",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "dotenv": "^18.0.10",
     "express": "^5.3.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
+    "prisma": "^7.10.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

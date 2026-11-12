@@ -1,38 +1,29 @@
-import path from "node:path";
-import Database from "better-sqlite3";
-
-// tasks.db lives in the project root (one level above src/ and dist/).
-// Set DB_PATH to use a different file, e.g. DB_PATH=test.db.
-export const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, "..", "tasks.db");
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "./generated/prisma/client";
 
 const SEED_TASKS = [
-  { title: "Buy milk", done: 0 },
-  { title: "Learn SQL", done: 0 },
-  { title: "Finish Assignment 1", done: 1 },
+  { title: "Buy milk", done: false },
+  { title: "Learn SQL", done: false },
+  { title: "Finish Assignment 1", done: true },
 ];
 
 /**
- * Opens (and creates, if missing) the SQLite database file,
- * creates the tasks table if it doesn't exist, and inserts the
- * example tasks only when the table is empty.
+ * Connects to Postgres using DATABASE_URL (from .env locally, or from
+ * docker-compose inside the container) and inserts the example tasks
+ * only when the table is empty. The table itself is created by the
+ * migration SQL in prisma/migrations, not here.
  */
-export function openDatabase(file: string = DB_PATH): Database.Database {
-  const db = new Database(file);
+export async function openDatabase(): Promise<PrismaClient> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is not set (copy .env.example to .env)");
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id    INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT    NOT NULL,
-      done  BOOLEAN NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
-    )
-  `);
+  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  await prisma.$connect();
 
-  const { count } = db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as { count: number };
-  if (count === 0) {
-    const insert = db.prepare("INSERT INTO tasks (title, done) VALUES (@title, @done)");
-    db.transaction(() => SEED_TASKS.forEach((t) => insert.run(t)))();
+  if ((await prisma.task.count()) === 0) {
+    await prisma.task.createMany({ data: SEED_TASKS });
     console.log(`Seeded ${SEED_TASKS.length} example tasks`);
   }
 
-  return db;
+  return prisma;
 }
