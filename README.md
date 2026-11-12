@@ -19,8 +19,8 @@ Requirements: **Docker** with Docker Compose. (Node.js 20+ only if you want to r
 app outside Docker.)
 
 ```bash
-git clone <this repo>
-cd <this repo>
+git clone https://github.com/OlaOluwalekan/conteinerzation-w3.git
+cd conteinerzation-w3
 cp .env.example .env      # then change POSTGRES_PASSWORD (and DATABASE_URL to match)
 docker compose up --build
 ```
@@ -44,13 +44,13 @@ Stop it with `docker compose down`. Your data stays in the `pgdata` volume. Only
 All settings come from `.env`, which is **gitignored**. [`.env.example`](.env.example)
 is committed and lists every variable:
 
-| Variable            | Used by                    | Purpose                                                |
-| ------------------- | -------------------------- | ------------------------------------------------------ |
-| `POSTGRES_USER`     | compose (db + app)         | Database user                                          |
-| `POSTGRES_PASSWORD` | compose (db + app)         | Database password                                      |
-| `POSTGRES_DB`       | compose (db + app)         | Database name                                          |
-| `APP_PORT`          | compose (app)              | Host port the API is published on (default 3000)       |
-| `DATABASE_URL`      | Prisma CLI / `npm run dev` | Connection string when running **on the host**         |
+| Variable            | Used by                    | Purpose                                          |
+| ------------------- | -------------------------- | ------------------------------------------------ |
+| `POSTGRES_USER`     | compose (db + app)         | Database user                                    |
+| `POSTGRES_PASSWORD` | compose (db + app)         | Database password                                |
+| `POSTGRES_DB`       | compose (db + app)         | Database name                                    |
+| `APP_PORT`          | compose (app)              | Host port the API is published on (default 3000) |
+| `DATABASE_URL`      | Prisma CLI / `npm run dev` | Connection string when running **on the host**   |
 
 Inside Docker the app doesn't use `DATABASE_URL` from `.env`. Compose builds its own
 from the `POSTGRES_*` values with host `db` (the service name), because `localhost`
@@ -78,13 +78,13 @@ from A2 is gone.
 The point of A2's layering was that switching storage should only touch the data
 layer. Here is what actually happened:
 
-| File                   | Changed? | What changed                                                                                                                                          |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/taskRepository.ts` | Rewritten | Now a `TaskRepository` **interface** plus a `PostgresTaskRepository` class that implements it with Prisma. The SQLite class is gone.                     |
-| `src/db.ts`             | Rewritten | Creates the Prisma client (with the `pg` driver adapter) and seeds. Table creation moved to the migration SQL.                                          |
-| `src/server.ts`         | Small     | Builds `PostgresTaskRepository` and passes it to `createApp`; async start-up and shutdown.                                                              |
-| `src/validation.ts`     | **No**    | Untouched.                                                                                                                                             |
-| `src/app.ts` (routes)   | **Yes, a little** | Paths, status codes, validation and responses are **unchanged**. Two honest differences, shown below.                                         |
+| File                    | Changed?          | What changed                                                                                                                         |
+| ----------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/taskRepository.ts` | Rewritten         | Now a `TaskRepository` **interface** plus a `PostgresTaskRepository` class that implements it with Prisma. The SQLite class is gone. |
+| `src/db.ts`             | Rewritten         | Creates the Prisma client (with the `pg` driver adapter) and seeds. Table creation moved to the migration SQL.                       |
+| `src/server.ts`         | Small             | Builds `PostgresTaskRepository` and passes it to `createApp`; async start-up and shutdown.                                           |
+| `src/validation.ts`     | **No**            | Untouched.                                                                                                                           |
+| `src/app.ts` (routes)   | **Yes, a little** | Paths, status codes, validation and responses are **unchanged**. Two honest differences, shown below.                                |
 
 To be honest about the routes: they did change, but only in how they call the
 repository, not in what they do.
@@ -97,7 +97,7 @@ repository, not in what they do.
    no change.
 2. **Dependency injection.** In A2, `createApp(db)` built the SQLite repository itself.
    Now `createApp(tasks: TaskRepository)` receives a repository, so `app.ts` doesn't
-   import any database code at all. This is the change that makes the *next* storage
+   import any database code at all. This is the change that makes the _next_ storage
    swap touch only `server.ts` and a new repository class.
 
 The lesson: A2's layering held up (no SQL or Prisma leaks into the routes), but a
@@ -130,10 +130,12 @@ curl localhost:3001/tasks                 # AFTER
 Before and after were identical:
 
 ```json
-[{"id":1,"title":"Buy milk","done":true},
- {"id":3,"title":"Finish Assignment 1","done":true},
- {"id":4,"title":"Survive a restart","done":false},
- {"id":5,"title":"Persist me too","done":true}]
+[
+  { "id": 1, "title": "Buy milk", "done": true },
+  { "id": 3, "title": "Finish Assignment 1", "done": true },
+  { "id": 4, "title": "Survive a restart", "done": false },
+  { "id": 5, "title": "Persist me too", "done": true }
+]
 ```
 
 Three things show it is real persistence and not a re-seed:
@@ -159,13 +161,13 @@ npm run dev
 
 This uses `DATABASE_URL` from `.env` (host `localhost:5432`).
 
-| Script               | What it does                                       |
-| -------------------- | -------------------------------------------------- |
-| `npm run dev`        | Start with auto-reload (tsx)                       |
-| `npm run build`      | Generate the Prisma client and compile to `dist/`  |
-| `npm start`          | Run the compiled build                             |
-| `npm run typecheck`  | Type-check without writing files                   |
-| `npm run db:migrate` | `prisma migrate dev`                               |
+| Script               | What it does                                      |
+| -------------------- | ------------------------------------------------- |
+| `npm run dev`        | Start with auto-reload (tsx)                      |
+| `npm run build`      | Generate the Prisma client and compile to `dist/` |
+| `npm start`          | Run the compiled build                            |
+| `npm run typecheck`  | Type-check without writing files                  |
+| `npm run db:migrate` | `prisma migrate dev`                              |
 
 ## API
 
