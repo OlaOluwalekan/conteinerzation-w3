@@ -16,18 +16,36 @@ services:
       timeout: 5s
       retries: 15
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379" # exposed so npm run dev / redis-cli on the host can connect
+    volumes:
+      - redisdata:/data # Redis snapshots land here, so cached data can survive restarts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"] # healthy once Redis answers PONG
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
   app:
     build: .
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy # wait until Postgres accepts connections
+      redis:
+        condition: service_healthy # wait until Redis answers PING
     environment:
       # Inside the compose network the database host is the service name "db".
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      # Same idea for Redis: the host is the service name "redis", not localhost.
+      REDIS_URL: redis://redis:6379
       PORT: 3000
     ports:
       - "${APP_PORT:-3000}:3000"
 
 volumes:
   pgdata:
+  redisdata:

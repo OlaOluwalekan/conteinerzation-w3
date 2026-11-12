@@ -12,9 +12,29 @@ function parseId(req: Request): number | undefined {
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-export function createApp(tasks: TaskRepository) {
+/** Named dependency checks for /health; each one rejects if its service is down. */
+export type HealthChecks = Record<string, () => Promise<void>>;
+
+export function createApp(tasks: TaskRepository, healthChecks: HealthChecks = {}) {
   const app = express();
   app.use(express.json());
+
+  // GET /health — pings every dependency; 200 if all are up, 503 if any is down
+  app.get("/health", async (_req: Request, res: Response) => {
+    const entries = await Promise.all(
+      Object.entries(healthChecks).map(async ([name, check]) => {
+        try {
+          await check();
+          return [name, "up"] as const;
+        } catch {
+          return [name, "down"] as const;
+        }
+      }),
+    );
+    const services = Object.fromEntries(entries);
+    const ok = entries.every(([, status]) => status === "up");
+    res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded", services });
+  });
 
   // GET /tasks — every task
   app.get("/tasks", async (_req: Request, res: Response) => {

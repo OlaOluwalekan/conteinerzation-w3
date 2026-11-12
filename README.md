@@ -1,7 +1,7 @@
 # Task API: Postgres + Docker Compose
 
 A small CRUD API for a to-do list, built with **TypeScript**, **Express**, **PostgreSQL**
-and **Prisma**, running as a two-container stack with Docker Compose.
+and **Prisma**, running as a three-container stack (app, Postgres, Redis) with Docker Compose.
 
 This is Assignment 3 (BE-04, "Containerize your stack"). It starts from my A2 project
 ([connecting-db-w3](https://github.com/OlaOluwalekan/connecting-db-w3)), which stored
@@ -11,6 +11,7 @@ tasks in SQLite, and moves storage to Postgres running in Docker.
 A1:  Client -> API -> array in memory
 A2:  Client -> API -> SQLite file (tasks.db)
 A3:  Client -> API container -> Postgres container -> Docker volume (pgdata)
+                             -> Redis container    (ready for W4 caching/jobs)
 ```
 
 ## Quick start
@@ -29,12 +30,14 @@ The API is at `http://localhost:3000` (or whatever `APP_PORT` you set in `.env`)
 
 On start-up the stack:
 
-1. starts Postgres and waits until it is healthy (`pg_isready` health check),
+1. starts Postgres and Redis and waits until both are healthy (`pg_isready` and
+   `redis-cli ping` health checks),
 2. runs `prisma migrate deploy` in the app container, which runs
    [`prisma/migrations/…_init/migration.sql`](prisma/migrations) to create the `tasks`
    table if it hasn't been applied yet,
 3. inserts three example tasks, but only when the table is empty,
-4. starts the API.
+4. connects to Redis and sends a `PING` (the log shows `Redis PING -> PONG`),
+5. starts the API.
 
 Stop it with `docker compose down`. Your data stays in the `pgdata` volume. Only
 `docker compose down -v` deletes it.
@@ -51,9 +54,10 @@ is committed and lists every variable:
 | `POSTGRES_DB`       | compose (db + app)         | Database name                                    |
 | `APP_PORT`          | compose (app)              | Host port the API is published on (default 3000) |
 | `DATABASE_URL`      | Prisma CLI / `npm run dev` | Connection string when running **on the host**   |
+| `REDIS_URL`         | `npm run dev`              | Redis URL when running **on the host**           |
 
-Inside Docker the app doesn't use `DATABASE_URL` from `.env`. Compose builds its own
-from the `POSTGRES_*` values with host `db` (the service name), because `localhost`
+Inside Docker the app doesn't use `DATABASE_URL` or `REDIS_URL` from `.env`. Compose
+sets its own, with hosts `db` and `redis` (the service names), because `localhost`
 inside the app container is the app container itself.
 
 ## The table: one SQL file
@@ -148,18 +152,69 @@ Three things show it is real persistence and not a re-seed:
 `docker compose down` deletes the containers, not just stops them, so the only thing
 that carried the data across was the `pgdata` named volume.
 
+## Stretch: Redis
+
+Redis is in the stack now so Week 4 (caching, jobs) can build on it. Nothing is cached
+yet; the app only proves it can reach Redis.
+
+How it fits together:
+
+```
+docker-compose.yml   redis service (redis:7-alpine), healthcheck = redis-cli ping,
+                     redisdata volume; app waits for it (depends_on: service_healthy)
+                     and gets REDIS_URL=redis://redis:6379
+        |
+src/redis.ts         openRedis(): createClient({ url: REDIS_URL }), connect(),
+                     ping() once and log "Redis PING -> PONG"
+        |
+src/server.ts        opens Redis after Postgres; passes a ping check for each to
+                     createApp; closes both on shutdown
+        |
+src/app.ts           GET /health runs every check: 200 if all are up, 503 if any is down
+```
+
+`app.ts` still doesn't import Redis or Prisma. It receives the checks as plain
+functions, the same way it receives the `TaskRepository`.
+
+What I checked:
+
+```bash
+curl localhost:3001/health
+# {"status":"ok","services":{"postgres":"up","redis":"up"}}          200
+
+docker compose stop redis
+curl localhost:3001/health
+# {"status":"degraded","services":{"postgres":"up","redis":"down"}}  503
+# /tasks kept working, and the app container stayed up
+
+docker compose start redis
+curl localhost:3001/health
+# {"status":"ok","services":{"postgres":"up","redis":"up"}}          200
+```
+
+The client reconnects by itself. The `redis.on("error", ...)` listener in
+`src/redis.ts` matters here: without it, losing the connection emits an unhandled
+`error` event and crashes the whole app.
+
+You can also talk to Redis directly:
+
+```bash
+docker compose exec redis redis-cli ping   # PONG
+```
+
 ## Running the app on the host (optional)
 
-Useful for fast reloads while developing. Postgres still runs in Docker:
+Useful for fast reloads while developing. Postgres and Redis still run in Docker:
 
 ```bash
 npm install                 # also runs prisma generate
-docker compose up -d db     # just the database
+docker compose up -d db redis   # just the backing services
 npx prisma migrate dev      # apply migrations (and create new ones after schema edits)
 npm run dev
 ```
 
-This uses `DATABASE_URL` from `.env` (host `localhost:5432`).
+This uses `DATABASE_URL` and `REDIS_URL` from `.env` (hosts `localhost:5432` and
+`localhost:6379`).
 
 | Script               | What it does                                      |
 | -------------------- | ------------------------------------------------- |
@@ -171,7 +226,7 @@ This uses `DATABASE_URL` from `.env` (host `localhost:5432`).
 
 ## API
 
-Same as A1/A2.
+Same as A1/A2, plus `/health`.
 
 | Method   | Path         | Body                                                         | Success                      | Errors       |
 | -------- | ------------ | ------------------------------------------------------------ | ---------------------------- | ------------ |
@@ -180,23 +235,25 @@ Same as A1/A2.
 | `POST`   | `/tasks`     | `{ "title": string, "done"?: boolean }`                      | `201` with the created task  | `400`        |
 | `PUT`    | `/tasks/:id` | `{ "title"?: string, "done"?: boolean }`, at least one field | `200` with the updated task  | `400`, `404` |
 | `DELETE` | `/tasks/:id` | none                                                         | `204`, no content            | `404`        |
+| `GET`    | `/health`    | none                                                         | `200`, all services up       | `503`        |
 
 ## Project structure
 
 ```
 src/
-  server.ts            starts the HTTP server, wires Postgres repository into the app
+  server.ts            starts the HTTP server, wires Postgres, Redis and health checks into the app
   app.ts               Express routes (API layer), depends only on the TaskRepository interface
   taskRepository.ts    TaskRepository interface + PostgresTaskRepository (Prisma)
   validation.ts        request body validation
   db.ts                creates the Prisma client, seeds example tasks
+  redis.ts             connects to Redis and pings it once
   generated/prisma/    generated Prisma client (gitignored)
 prisma/
   schema.prisma        Task model -> "tasks" table
   migrations/          the SQL that creates the table
 prisma.config.ts       tells Prisma where the schema is and reads DATABASE_URL
 Dockerfile             two-stage build: compile, then slim runtime image
-docker-compose.yml     app + db, pgdata volume, health check
+docker-compose.yml     app + db + redis, pgdata and redisdata volumes, health checks
 .env.example           committed template for the gitignored .env
 queries.sql            SQL I ran by hand against the database
 ```
